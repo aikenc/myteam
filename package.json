@@ -1,0 +1,22 @@
+{
+  "name": "myteam",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "myteam": "./dist/cli/index.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "node --test dist/tests/**/*.test.js",
+    "clean": "rm -rf dist"
+  },
+  "engines": {
+    "node": ">=20.19.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.19.0",
+    "typescript": "^5.8.0"
+  }
+}
