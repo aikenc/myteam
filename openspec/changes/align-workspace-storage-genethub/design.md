@@ -170,15 +170,15 @@ interface SessionMetadata {
   projectState?: {           // agents-chat 专有
     title: string;
     goal: string;
-    driverId: string;        // 'freeform' | 'simple-lifecycle'
-    phase: ProjectPhase;     // 'coordination' | 'execution' | 'verification' | 'completion'
-    status: ProjectStatus;   // 'running' | 'completed' | 'failed' | 'cancelled'
+    driverId: string;        // 'freeform'
+    phase: ProjectPhase;     // 'coordination' | 'done' | 'failed' 等自由编排阶段
+    status: ProjectStatus;   // 'created' | 'running' | 'done' | 'failed' | 'cancelled'
     turnCount: number;
     nextSpeakerId: string | null;
-    allowedTransitions: TransitionKind[];  // 'delegate' | 'finalize' | 'fail' | 'approval'
+    allowedTransitions: TransitionKind[];  // 兼容旧命名，语义等同 allowedActions：'delegate' | 'finalize' | 'fail' | 'approval'
     artifacts: Artifact[];
-    plan: Plan | null;
-    verification: Verification | null;
+    plan: Plan | null;                    // 可选 artifact，不代表固定阶段
+    verification: Verification | null;    // 可选 artifact，不代表固定阶段
     lastAction: Action | null;
     driverState: Record<string, unknown>;
     outcome: Outcome;
@@ -191,8 +191,8 @@ interface SessionMetadata {
 ```ts
 type Outcome =
   | { kind: 'pending' }
-  | { kind: 'success'; summary: string }
-  | { kind: 'failure'; reason: string; retryable: boolean }
+  | { kind: 'done'; summary: string; deliverables?: string[]; previewUrls?: string[] }
+  | { kind: 'failed'; error: string; detail?: string; retryable?: boolean }
   | { kind: 'cancelled'; reason?: string };
 ```
 

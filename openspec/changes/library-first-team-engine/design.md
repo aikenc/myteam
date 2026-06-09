@@ -12,7 +12,7 @@ Default CLI        -> 本地一次性执行任务；默认就是 run，不需要
 Replay CLI         -> 特殊诊断 / 复盘入口
 ```
 
-`TeamEngine` 是 MyTeam 的团队执行引擎。它不代表通用任务队列、HTTP server 或平台控制面；它负责把一个 `TaskRequest` 推进成可观察、可取消、可回放、可验收的运行过程。
+`TeamEngine` 是 MyTeam 的团队执行引擎。它不代表通用任务队列、HTTP server、平台控制面或沙箱实现；它负责把 `TaskRequest` 推进成可观察、可取消、可回放、可验收、可复现自愈的并发运行过程。
 
 ## 总体结构
 
@@ -64,11 +64,12 @@ packages/engine/src/
   contracts/                 # 公共类型与 schema；不得 import 其他 engine 内部业务目录
   workspace/                 # workspace loader 与插件协议
   tools/                     # tool registry 与 capability adapters
-  workflow/                  # PM driver / project state / actions
+  workflow/                  # Freeform PM driver / team run state / workflow actions
+  resources/                 # WorkspaceResourceCoordinator / locks / conflict policy
   runtimes/
     internal-agent/          # PI-backed InternalAgentRuntime adapter
     cli-agent/               # 外部 CLI Agent runtime
-  records/                   # TaskRecord / EventLog / Evidence / ReplayCase
+  records/                   # TaskRecord / EventLog / Evidence / ReplayCase / FailureFingerprint
   engine.ts                  # TeamEngine 组装层
 ```
 
@@ -203,6 +204,15 @@ interface SessionContextEntry {
 interface StartRunOptions {
   sessionId?: string;
   turnId?: string;
+  concurrencyKey?: string;
+  resourceHints?: ResourceHint[];
+  conflictPolicy?: 'wait' | 'fail' | 'fork';
+}
+
+interface ResourceHint {
+  kind: 'file' | 'directory' | 'browser-profile' | 'artifact' | 'external-cli' | 'custom';
+  id: string;
+  access: 'read' | 'write' | 'exclusive';
 }
 
 interface ActiveRun {
@@ -216,6 +226,7 @@ interface ActiveRun {
 
 type RunStatus =
   | 'queued'
+  | 'waiting_resource'
   | 'running'
   | 'blocked'
   | 'cancelling'
@@ -290,7 +301,7 @@ argv / stdin / --continue / --resume
 
 ## Replay CLI 行为
 
-`replay` 是特殊诊断 / 复盘命令：
+`replay` 是特殊诊断 / 复盘 / 自愈验证命令：
 
 ```bash
 myteam replay --run-id <run-id> --workspace . --json
@@ -302,12 +313,14 @@ myteam replay --case .myteam/runs/run_xxx/replay.json --json
 ```text
 ReplayCase / TaskRecord / run-id
   -> reconstruct replay input
+  -> choose evidence / deterministic / repair replay mode
+  -> restore or validate workspace snapshot when deterministic/repair requires it
   -> TeamEngine.start(replayRequest) 或 explicit evidence replay
   -> stream / outcome
-  -> 输出可比较结果或差异说明
+  -> 输出可比较结果、差异说明或 repair 验证结果
 ```
 
-replay 不能依赖 CLI 私有日志，必须基于 MyTeam 的 TaskRecord、TaskEvent、Evidence 和 ReplayCase。
+replay 不能依赖 CLI 私有日志，必须基于 MyTeam 的 TaskRecord、TaskEvent、Evidence 和 ReplayCase。MyTeam owns ReplayCase 格式和 replay workflow；workspace snapshot、文件系统隔离和底层沙箱由宿主或运行环境提供。若 deterministic / repair replay 所需能力不可用，系统必须给出明确的 unavailable 原因，不能伪装为已复现。
 
 ## 宿主服务器集成
 
@@ -348,6 +361,21 @@ sessionId
 `SessionTranscript` 至少包含 `sessionId` 与 `turnId`，并通过引用关联 `taskId` / `runId`。`TaskEvent`、`Evidence`、`TaskRecord` 必须至少包含 `runId`；需要关联用户任务和会话时同时包含 `taskId`、`sessionId`、`turnId`。
 
 这个区分能避免把“用户对话连续性”和“同一个用户任务的多次执行尝试”混成一条不可复盘的记录。
+
+## 并发语义与资源协调
+
+Library API 必须支持并发运行，不把 `TeamEngine` 降级为单 CLI 串行执行器。
+
+并发规则：
+
+- 一个 `TeamEngine` 实例可以同时管理多个 active runs。
+- 一个 `sessionId` 可以挂载多个并发 `taskId` / `runId`；session transcript 使用 append + revision / cursor 语义维护用户可见连续性。
+- 一个 `runId` 拥有独立 `EventLog`、`Evidence`、`TaskRecord` 和 `ReplayCase`，事件 seq 只要求在同一 `runId` 内单调递增。
+- 同一 `taskId` 的 retry / repair 默认互斥，除非调用方显式 `fork` 或使用新的 `taskId`。
+- workspace 写入、browser profile、artifact、外部 CLI 互斥能力等由 `WorkspaceResourceCoordinator` 管理。
+- `conflictPolicy` 至少支持：`wait`（进入 `waiting_resource`）、`fail`（结构化冲突错误）、`fork`（创建分支 run / session 或要求调用方提供 fork 目标）。
+
+MyTeam 不通过全局 session 锁来规避并发，而是通过资源级锁和事件/记录隔离来保证可解释性。
 
 ## 事件流与状态
 

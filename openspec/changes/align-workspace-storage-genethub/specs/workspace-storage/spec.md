@@ -245,18 +245,18 @@ A `user-chat` session SHALL include at minimum the user and one assistant partic
 
 ### Requirement: ProjectState captures multi-agent orchestration state
 
-For `agents-chat` sessions, `metadata.projectState` SHALL capture the orchestration state of the PM-agent team workflow with the following minimum fields:
+For `agents-chat` sessions, `metadata.projectState` SHALL capture the orchestration state of the Secretary / PM-driven workgroup workflow. The state follows a freeform driver model: it records durable state, next speaker, allowed actions, artifacts, last action, and driver-private data without requiring a fixed linear lifecycle graph.
 
 | 字段 | 类型 | 必要性 | 说明 |
 |------|------|--------|------|
 | `title` | `string` | MUST | 项目标题 |
 | `goal` | `string` | MUST | 项目目标 |
-| `driverId` | `string` | MUST | 驱动模式（如 'freeform', 'simple-lifecycle'） |
-| `phase` | `string` | MUST | 当前阶段（如 'coordination', 'execution', 'verification', 'completion'） |
-| `status` | `string` | MUST | 当前状态（如 'running', 'completed', 'failed', 'cancelled'） |
+| `driverId` | `string` | MUST | 驱动模式（如 'freeform'） |
+| `phase` | `string` | MUST | 当前自由编排阶段（如 'coordination'、'done'、'failed'；不得假设固定线性阶段图） |
+| `status` | `string` | MUST | 当前状态（如 'created', 'running', 'done', 'failed', 'cancelled'） |
 | `turnCount` | `number` | MUST | 当前轮次计数 |
 | `nextSpeakerId` | `string \| null` | MUST | 下一发言方 participant.id |
-| `allowedTransitions` | `string[]` | MUST | 允许的转换类型 |
+| `allowedTransitions` | `string[]` | MUST | 允许的 action 类型，兼容旧命名；语义等同 allowedActions |
 | `artifacts` | `Artifact[]` | MUST | 产出物列表 |
 | `plan` | `Plan \| null` | SHOULD | 当前计划 |
 | `verification` | `Verification \| null` | SHOULD | 验收状态 |
@@ -266,8 +266,8 @@ For `agents-chat` sessions, `metadata.projectState` SHALL capture the orchestrat
 
 The `Outcome` SHALL be one of:
 - `{ kind: 'pending' }` — execution not yet complete
-- `{ kind: 'success', summary: string }` — completed successfully
-- `{ kind: 'failure', reason: string, retryable: boolean }` — completed with failure
+- `{ kind: 'done', summary: string, deliverables?: string[], previewUrls?: string[] }` — completed successfully
+- `{ kind: 'failed', error: string, detail?: string, retryable?: boolean }` — completed with failure
 - `{ kind: 'cancelled', reason?: string }` — cancelled by user or system
 
 #### Scenario: New agents-chat starts with pending outcome

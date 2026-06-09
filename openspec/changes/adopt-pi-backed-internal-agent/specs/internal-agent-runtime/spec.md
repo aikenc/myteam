@@ -137,25 +137,34 @@ MyTeam SHALL 保留 `CLIAgent` 作为 Professional Agent 的一等形态。`CLIA
 
 ---
 
-### Requirement: PM Workflow Uses Explicit Driver State
+### Requirement: PM Workflow Uses Freeform Driver State
 
-MyTeam PM 工作流 SHALL 使用显式 `ProjectDriver` / workflow state 推进任务，而不是只通过 prompt 隐式模拟流程。Driver SHALL 定义状态、可用 action、下一轮 speaker、验收条件与终止条件。
+MyTeam PM 工作流 SHALL 使用显式 `ProjectDriver` / workflow state 推进任务，而不是只通过 prompt 隐式模拟流程。该 driver SHALL 采用自由状态机语义：定义可持久化状态、可用 action、下一轮 speaker、终止条件和必要安全网，但 MUST NOT 要求每个任务都经过固定线性的 `planning -> working -> reviewing` 阶段图。
 
 PM 可由 PI-backed `InternalAgent` 执行思考和工具调用，但 PM 的结构化输出 MUST 被 driver 解析、校验和持久化。
 
 #### Scenario: PM 工作流推进一轮
 
-- **GIVEN** 一个正在运行的 `ProjectState`
+- **GIVEN** 一个正在运行的 `ProjectState` 或 `TeamRunState`
 - **WHEN** TeamWorkflowLoop 执行一轮
 - **THEN** driver SHALL 通过 `getTurnDirective()` 决定 speaker 与本轮指令
 - **AND** 系统 SHALL 调用对应 agent 的 `runTurn()`
-- **AND** PM turn 的结构化 tool result SHALL 被解析为 `ProjectAction`
-- **AND** driver SHALL 通过 `applyTurn()` 推进状态
+- **AND** PM turn 的结构化 tool result SHALL 被解析为 `ProjectAction` 或 `WorkflowAction`
+- **AND** driver MAY 通过 `postProcessAction()` 执行安全网处理
+- **AND** driver SHALL 通过 `applyTurn()` 持久化状态、artifact、lastAction、nextSpeaker 和 allowedActions
 - **AND** 新状态 SHALL 被持久化到 TaskRecord 或 session state
+
+#### Scenario: 成员 turn 回到 PM 协调
+
+- **GIVEN** PM 通过 `delegate` action 委派了一个工作群成员
+- **WHEN** 该成员 turn 完成并返回 implementation、verification 或等价结果
+- **THEN** driver SHALL 将成员产出沉淀为 artifact 或 evidence
+- **AND** SHALL 将 `nextSpeaker` 设置回 PM 或等价 orchestrator
+- **AND** PM SHALL 决定继续委派、记录审批、finalize、fail 或其他允许 action
 
 #### Scenario: PM 成功收口
 
-- **GIVEN** PM 已完成计划、委派、实现和验收
+- **GIVEN** PM 判断任务已经可以交付
 - **WHEN** PM 调用 finalize action
 - **THEN** driver SHALL 校验 summary、deliverables、evidence 或无预览哨兵值
 - **AND** TaskResult SHALL 标记为 `succeeded`

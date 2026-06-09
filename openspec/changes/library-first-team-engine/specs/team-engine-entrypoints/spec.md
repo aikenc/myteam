@@ -10,6 +10,8 @@
 
 MyTeam SHALL define `TeamEngine` as the public library execution core. Library consumers, the default CLI adapter, and the replay adapter MUST convert their entrypoint-specific input into MyTeam public contracts, then call `TeamEngine`; they MUST NOT directly invoke PM, InternalAgent, CLIAgent, Team Workflow, or ToolAdapter.
 
+`TeamEngine` SHALL support concurrent active runs. `sessionId` MUST NOT be treated as a global execution lock; resource conflicts SHALL be handled through explicit resource coordination and conflict policy.
+
 `TeamEngine` SHALL expose at least the following session and run operations:
 
 - `openSession(input: OpenSessionInput): Promise<ConversationSession>`
@@ -92,7 +94,9 @@ The default CLI execution SHALL be a thin adapter over TeamEngine. Adapter-speci
 
 ### Requirement: Replay is an explicit diagnostic command
 
-MyTeam SHALL provide `myteam replay` as an explicit diagnostic and replay command. Replay MUST reconstruct replay input from `ReplayCase`, `TaskRecord`, or `runId`, then execute through TeamEngine or perform an explicitly marked evidence replay.
+MyTeam SHALL provide `myteam replay` as an explicit diagnostic, replay, and repair-verification command. Replay MUST reconstruct replay input from `ReplayCase`, `TaskRecord`, or `runId`, then execute through TeamEngine or perform an explicitly marked evidence replay.
+
+Replay modes SHALL be explicit: `evidence` replay replays records without rerunning model/tool effects; `deterministic` replay attempts to reproduce the original run with equivalent input/config/workspace snapshot; `repair` replay reruns historical cases against updated agent / skill / tool / workflow assets to verify self-healing.
 
 Replay MUST NOT rely on CLI-only logs, terminal rendering, host-server connection state, or adapter-private transient state.
 
@@ -112,6 +116,23 @@ Replay MUST NOT rely on CLI-only logs, terminal rendering, host-server connectio
 - **THEN** MyTeam SHALL load the replay case
 - **AND** SHALL execute through TeamEngine or perform an explicitly marked evidence replay
 - **AND** SHALL preserve the original run record without overwriting it
+
+#### Scenario: Deterministic replay requires snapshot capability
+
+- **GIVEN** a replay case requests deterministic replay
+- **AND** the case references a workspace snapshot
+- **WHEN** MyTeam starts replay
+- **THEN** MyTeam SHALL ask the host/runtime or configured adapter to restore or validate the workspace snapshot
+- **AND** if snapshot/isolation capability is unavailable, MyTeam SHALL return an explicit replay-unavailable result
+- **AND** MUST NOT pretend the replay was deterministic
+
+#### Scenario: Repair replay verifies a fix
+
+- **GIVEN** a historical failure has a `FailureFingerprint` and replay case
+- **WHEN** a user or host invokes repair replay with updated agent, skill, tool, or workflow assets
+- **THEN** MyTeam SHALL create a new replay run identity
+- **AND** SHALL compare the new outcome against the original failure
+- **AND** SHALL report whether the fix resolved, changed, or failed to reproduce the issue
 
 ---
 
@@ -260,6 +281,39 @@ A single `taskId` MAY have multiple `runId` values due to retry, replay, resume,
 
 ---
 
+### Requirement: TeamEngine supports concurrent runs with explicit resource coordination
+
+TeamEngine SHALL support multiple active runs concurrently, including multiple runs linked to the same `sessionId`. TeamEngine MUST NOT serialize all work by session as a hidden global lock.
+
+Each `runId` SHALL have independent `EventLog`, `Evidence`, `TaskRecord`, and `ReplayCase` storage. Shared workspace resources SHALL be coordinated through explicit resource hints, locks, and conflict policy.
+
+`StartRunOptions` SHOULD support `concurrencyKey`, `resourceHints`, and `conflictPolicy`. At minimum, `conflictPolicy` SHALL support `wait`, `fail`, and `fork` semantics.
+
+#### Scenario: Same session has concurrent runs
+
+- **GIVEN** a conversation session has one active run
+- **WHEN** the host submits another task linked to the same `sessionId`
+- **THEN** TeamEngine MAY start another run concurrently
+- **AND** each run SHALL maintain independent event sequence, evidence directory, task record, and replay case
+- **AND** session transcript updates SHALL remain append-only and cursor-addressable
+
+#### Scenario: Resource conflict waits explicitly
+
+- **GIVEN** two runs both request exclusive write access to the same file path
+- **WHEN** the second run starts with `conflictPolicy = "wait"`
+- **THEN** TeamEngine SHALL place the second run in `waiting_resource`
+- **AND** SHALL emit a resource waiting event
+- **AND** SHALL resume the run when the resource is released or fail with a structured timeout/cancellation error
+
+#### Scenario: Resource conflict fails explicitly
+
+- **GIVEN** two runs conflict on an exclusive workspace resource
+- **WHEN** the second run starts with `conflictPolicy = "fail"`
+- **THEN** TeamEngine SHALL fail or reject the start request with a structured conflict error
+- **AND** MUST NOT silently serialize the run without reporting the conflict policy outcome
+
+---
+
 ### Requirement: Event stream is durable, ordered, and cursor-addressable
 
 TeamEngine SHALL expose task progress through `stream(runId, cursor?)`. Events MUST be ordered per `runId` using a monotonically increasing `seq`. `EventCursor` SHALL include at least `runId` and `seq` so library consumers, host transports, CLI output, and replay consumers can resume from a known point.
@@ -291,6 +345,7 @@ TeamEngine SHALL expose current state through `check(runId)` and final result th
 At minimum, MyTeam SHALL support:
 
 - `queued`
+- `waiting_resource`
 - `running`
 - `blocked`
 - `cancelling`
@@ -368,7 +423,7 @@ MyTeam MUST NOT use repeated invocations of the `myteam` CLI to implement produc
 
 ### Requirement: Replay is based on TeamEngine records, not adapter-private logs
 
-MyTeam SHALL generate `TaskRecord`, `EventLog`, `Evidence`, and `ReplayCase` from TeamEngine-owned execution data. Replay MUST NOT rely on CLI-only logs, host-server connection state, or adapter-private transient state.
+MyTeam SHALL generate `TaskRecord`, `EventLog`, `Evidence`, `ReplayCase`, and failure fingerprint candidates from TeamEngine-owned execution data. Replay MUST NOT rely on CLI-only logs, host-server connection state, or adapter-private transient state. ReplayCase SHALL capture enough sanitized metadata to support evidence replay, deterministic replay when host snapshot/isolation capability is available, and repair replay for self-healing validation.
 
 #### Scenario: Default CLI execution exports replay case
 

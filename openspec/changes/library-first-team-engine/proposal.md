@@ -22,7 +22,7 @@ CLI 只保留两个边界：
 - 明确不提供 `myteam serve`，不要求显式 `myteam run`。
 - 保留 `myteam replay` 作为特殊诊断 / 复盘命令。
 - 定义最小接口：`openSession`、`resumeSession`、`forkSession`、`start`、`stream`、`check`、`outcome`、`cancel`。
-- 定义 `sessionId`、`turnId`、`taskId` 与 `runId` 的关系，以及会话 transcript、事件流、状态、最终结果、取消、replay 与错误语义。
+- 定义 `sessionId`、`turnId`、`taskId` 与 `runId` 的关系，以及会话 transcript、并发 run、资源冲突、事件流、状态、最终结果、取消、replay 与错误语义。
 - 明确生产服务器、高频消息、turn 和 tool-call 不得通过反复启动 CLI 完成。
 
 ## 能力范围
@@ -67,3 +67,5 @@ CLI 只保留两个边界：
 - 如果 `outcome` 等待语义没有超时策略，CLI 或宿主服务器可能被长时间阻塞。
 - 如果取消只中断外层 promise 而不传递到 PM、Agent 和工具，可能产生悬挂进程或错误 evidence。
 - 如果 replay 读取 CLI 专用日志而不是 TaskRecord / EventLog，会造成 library 路径不可复盘。
+- 如果 deterministic / repair replay 缺少 workspace snapshot 或隔离能力却不显式报 unavailable，会破坏运营自愈的可信度。
+- 如果并发 run 共享 workspace 资源但没有显式 resource lock 和 conflict policy，会造成 evidence、artifact 和 replay case 不可解释。

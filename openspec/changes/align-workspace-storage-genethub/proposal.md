@@ -4,8 +4,8 @@
 
 MyTeam 当前处于架构设计阶段，workspace 存储结构尚未落地。GenetHub 的 `assistant-core` 已经沉淀了一套成熟的 workspace 持久化方案，包括 session 文件存储、原子写入、目录约定、消息模型和 project state 管理。这套方案直接对齐 MyTeam 的需求：
 
-- MyTeam 的核心产品叙事同样是"用户 → PM → Professional CLI Agents"的协作模型
-- MyTeam 同样需要区分 `user-chat`（用户-PM 对话）和 `agents-chat`（PM-Agent 群聊任务）
+- MyTeam 的核心产品叙事是"用户 → Secretary / PM → PM-driven Workgroup"的协作模型
+- MyTeam 同样需要区分 `user-chat`（用户-PM 对话）和 `agents-chat`（PM 工作群任务）
 - MyTeam 同样需要耐久会话、任务编排状态、消息归档和过程可追踪
 - MyTeam 是独立项目，但不需要为相同问题重新发明轮子
 
