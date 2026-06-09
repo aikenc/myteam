@@ -6,16 +6,14 @@ context: |
   MyTeam 的目标是把传统 Coding Agent 偏工程师化、偏日志化、偏一次性执行的体验，改造成对人极度友好的工作推进体验：用户只需要自然表达目标，系统负责理解、组织、推进、检查、交代。
 
   核心产品叙事：
-  - 秘书理解人：Secretary Agent 负责用户沟通、目标理解、澄清、状态翻译和最终回复。
-  - PM 推进事：PM Agent 负责计划、拆解、委派、状态跟踪、验收、返工和收口。
+  - PM 理解人并推进事：PM Agent 负责用户沟通、目标理解、澄清、状态翻译和最终回复，同时负责计划、拆解、委派、状态跟踪、验收、返工和收口。
   - 专业 Agent 干活：Professional CLI Agents 负责代码、文档、浏览器、数据、测试等具体任务。
   - 过程可追踪：关键决策、工具调用、产物、错误和验收结果都要形成结构化记录。
   - 事事有回音，件件有着落：每个请求最终都要有可用结果、明确失败说明或下一步建议。
 
   MyTeam 当前核心对象：
-  - Agent Core：TaskRequest 到 TaskResult 的生命周期、上下文、事件总线、工具注册、错误模型、任务记录、replay。
-  - Secretary Agent：理解用户目标、上下文、隐含约束、交付口径和不确定性。
-  - PM Agent：拆解任务、选择专业 Agent、设定验收点、跟踪状态、要求返工、汇总证据。
+  - TeamEngine：TaskRequest 到 TaskResult 的生命周期、上下文、事件总线、工具注册、错误模型、任务记录、replay。
+  - PM Agent：理解用户目标、上下文、隐含约束、交付口径和不确定性；拆解任务、选择专业 Agent、设定验收点、跟踪状态、要求返工、汇总证据。
   - Professional CLI Agents：coder、browser、doc-writer、data-worker、qa 等能力成员。
   - Workspace Layer：SOUL.md、agents/、skills/、tools/、myteam.config.json 等项目插件层。
   - Tool & Capability Adapters：受控访问 file / shell / browser / external CLI 等能力。
@@ -23,8 +21,9 @@ context: |
   工程规则：
   - 新功能、架构变化、接口变化、事件模型变化、错误模型变化、workspace 插件协议变化、agent 编排语义变化，必须先创建 OpenSpec change。
   - 纯文档编辑或不改变行为的小型 bug 修复可以跳过 OpenSpec。
-  - run、serve、replay 必须共享同一套 Agent Core，不能维护多套业务实现。
-  - CLI 只在任务、会话、诊断、回放边界使用，不能进入 turn、tool-call、消息流等高频路径。
+  - library API、默认 CLI、replay 必须共享同一套 TeamEngine，不能维护多套业务实现。
+  - 运行基线对齐 PI：Node.js >=22.19.0，TypeScript 使用可擦除语法约束；低版本 Node 子进程隔离路线不作为默认方案。
+  - CLI 只在本地任务执行、会话、诊断、回放边界使用，不能进入 turn、tool-call、消息流等高频路径。
   - workspace 插件必须显式、可版本化、可追踪；关键配置缺失必须 fail-fast，禁止静默 fallback。
   - TaskResult、TaskEvent、TaskRecord、Evidence、ReplayCase 必须足以支撑调试、复盘和持续改进。
   - 不用健康检查、mock 或纯 API 成功冒充真实任务完成。
@@ -33,7 +32,7 @@ context: |
 rules:
   proposal:
     - 用中文说明用户或操作者能感知到的结果。
-    - 明确影响边界：Agent Core、Secretary、PM、Professional Agent、Workspace Layer、Tool Adapter、TaskEvent/Error/Replay、CLI/Server API、文档。
+    - 明确影响边界：TeamEngine、PM、Professional Agent、Workspace Layer、Tool Adapter、TaskEvent/Error/Replay、Library API、默认 CLI、文档。
     - 如果变更可能漂移成通用项目管理系统、大型平台控制面、发布平台、沙箱管理或质量平台，必须明确列为非目标。
     - 明确权限、secret、浏览器能力、shell 能力、replay 确定性、事件兼容性、长任务状态跟踪等风险。
   specs:
@@ -45,7 +44,7 @@ rules:
     - 以 README.md 和 docs/technical-architecture.md 的最新描述为准。
     - 优先保持 MyTeam 独立项目叙事，不引用 GenetHub Next Gen V1 作为身份定义。
     - 优先分阶段交付，先打通最小可运行的真实任务闭环。
-    - 当 run / serve / replay、Secretary / PM / Agent、事件 / 证据流复杂时，应包含数据流或生命周期图。
+    - 当 library API / 默认 CLI / replay、PM / Agent、事件 / 证据流复杂时，应包含数据流或生命周期图。
     - 必须说明验证方式、TaskRecord / Evidence / ReplayCase 预期。
   tasks:
     - 按可独立验证的阶段分组。
