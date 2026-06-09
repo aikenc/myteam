@@ -42,6 +42,29 @@ Team Workflow, replay, fork, repair replay, CLI adapters, and host integrations 
 
 ---
 
+### Requirement: Prepared workspace declares its execution boundary
+
+Every prepared workspace copy SHALL declare its execution boundary and isolation capability. At minimum, `PreparedWorkspaceCopy` metadata SHALL record the prepared path, provider kind, source `WorkspaceSnapshotRef`, whether the copy is disposable or retained, and an `isolationLevel` such as `workspace-copy`, `process-isolated`, `container`, or `host-provided`.
+
+MyTeam MUST treat the prepared workspace path as the execution root for replay, fork, repair replay, and tool calls attached to that run. MyTeam MUST NOT assume that a workspace copy provides process, network, or credential isolation unless the provider or host capability explicitly declares it.
+
+#### Scenario: Git worktree copy declares limited isolation
+
+- **GIVEN** Git V1 provider prepares a replay copy using `git worktree`
+- **WHEN** MyTeam records the prepared copy metadata
+- **THEN** the copy SHALL declare `isolationLevel = "workspace-copy"` or equivalent
+- **AND** MyTeam SHALL record that process, network, and credential isolation are not provided by Git worktree itself
+- **AND** tool capability checks SHALL still run before file, shell, browser, or external CLI access
+
+#### Scenario: Host provider declares stronger isolation
+
+- **GIVEN** a host-provided workspace provider prepares a containerized copy
+- **WHEN** MyTeam records the prepared copy metadata
+- **THEN** the copy SHALL declare the host-provided isolation capability
+- **AND** ReplayCase SHALL persist enough non-secret metadata to explain which isolation boundary was used
+
+---
+
 ### Requirement: Git V1 uses internal snapshot commits and worktrees
 
 MyTeam V1 SHALL provide a `git-v1` workspace provider. The provider SHALL capture workspace state by creating internal Git snapshot commits and SHALL prepare executable copies using `git worktree`.
@@ -181,6 +204,8 @@ V1 SHALL capture workspace snapshots at these points:
 The Git V1 provider SHALL exclude Git-ignored files by default. Secret-bearing files such as `.env` and credential files MUST NOT be captured unless explicitly allowed by a safe, auditable allowlist policy.
 
 If deterministic replay requires excluded files, MyTeam SHALL mark replay unavailable or degraded with a clear reason. MyTeam MUST NOT silently include ignored or secret-bearing files to make replay succeed.
+
+MyTeam runtime paths such as `.myteam/`, Git internals such as `.git/`, prepared copy directories, and redaction paths SHALL be excluded from snapshots by default even if they are not Git-ignored.
 
 #### Scenario: Ignored test data is required
 

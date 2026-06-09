@@ -61,6 +61,6 @@ MyTeam 当前处于架构设计阶段，workspace 存储结构尚未落地。Gen
 ## 风险
 
 - session 文件全部写入单个 JSON 文件，消息量大时可能导致读写负担；需要在 spec 中预留 archive 分离和未来的分页/增量策略。
-- 原子写入依赖文件系统 rename 原子性；在非 POSIX 文件系统上可能不可靠，需在 spec 中声明前提。
+- 原子写入只能保证文件不损坏，不能保证并发逻辑合并；必须通过 per-session lock、revision 或等价机制避免 last-write-wins 丢消息。
 - `agents-chat` 的 `metadata.projectState` 与 workflow 的执行状态必须单源管理，避免两份状态不一致。
 - session 文件包含完整消息历史；spec 必须约束不在 session 文件中存储 secret、private reasoning 或敏感上下文。

@@ -177,7 +177,7 @@ PI event 只作为内部事件源。MyTeam 应定义独立 `TaskEvent`：
 | `turn_end` | `agent.turn.completed` |
 | `agent_end` | `agent.run.completed` |
 
-映射时必须补充 `taskId`、`agentId`、`subtaskId`、时间戳、可见性、evidence 引用等 MyTeam 字段。
+映射时必须补充 `runId`、可用时的 `taskId`、`agentId`、`subtaskId`、时间戳、可见性、evidence 引用等 MyTeam 字段。`runId` 是事件归属的强制字段，不能用 PI request/message/tool ID 或 `taskId` 替代。
 
 ## Replay 边界
 

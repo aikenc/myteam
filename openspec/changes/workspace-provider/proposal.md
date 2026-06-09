@@ -14,7 +14,7 @@ MyTeam 的 replay、fork、repair replay 和运营自愈都依赖一个关键前
 - 定义 `WorkspaceProvider` 抽象：`inspect`、`capture`、`prepareCopy`、`forkCopy`、`cleanup`。
 - 定义 Git V1 实现：通过临时 index、`write-tree`、`commit-tree`、`update-ref` 生成内部 snapshot ref，通过 `git worktree add` 懒创建 replay/fork workspace。
 - 明确嵌套 Git 必须被处理：V1 SHALL 发现并递归 snapshot workspace 内的 nested Git repo / submodule / worktree；dirty 与 untracked non-ignored 状态 MUST 被捕获或显式失败，不能假装 deterministic replay 可用。
-- 明确 ignored 文件默认不进入 snapshot；如需纳入，必须通过显式 allowlist，并记录 redaction report。
+- 明确 ignored 文件、`.myteam/` runtime 数据、prepared copy 目录和 secret-bearing paths 默认不进入 snapshot；如需纳入 ignored 业务文件，必须通过显式 allowlist，并记录 redaction report。
 - 明确 `WorkspaceSnapshotRef` 与 `ReplayNode`、`ReplayCase`、`ForkRecord` 的关系。
 - 明确非 Git workspace 在 V1 只支持 evidence replay，除非宿主提供兼容的 workspace provider。
 
@@ -49,7 +49,7 @@ MyTeam 的 replay、fork、repair replay 和运营自愈都依赖一个关键前
 
 - 不在 V1 支持所有非 Git workspace 的 deterministic replay；非 Git workspace 默认只支持 evidence replay。
 - 不在 V1 实现 overlayfs、Btrfs/ZFS/APFS snapshot、container snapshot 或远程 volume snapshot。
-- 不把 `WorkspaceProvider` 变成沙箱；它只负责 workspace 状态、副本和生命周期，不负责安全隔离。
+- 不把 `WorkspaceProvider` 当成隐式全能安全黑盒；它必须显式声明 workspace copy、进程隔离、容器隔离或 host-provided 隔离能力的边界与不可用原因。
 - 不默认收集 ignored 文件、secret、node_modules、构建缓存或大文件。
 - 不要求每个 tool-call 都生成 workspace snapshot；V1 先支持 agent-turn / verification 等关键节点。
 

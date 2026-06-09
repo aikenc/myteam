@@ -10,12 +10,18 @@
 
 MyTeam SHALL define a standardized workspace layout that separates user-editable plugin assets from MyTeam runtime data. User-editable assets SHALL live at the workspace root; runtime persistence SHALL live under `.myteam/`.
 
-At minimum, the workspace root MUST contain or allow creation of:
+At minimum, the workspace layout SHALL distinguish three modes:
+
+| 模式 | 行为 |
+|------|------|
+| `init` | MAY create user-editable asset directories and runtime directories under the resolved workspace root |
+| `run` | MUST validate required prompt assets, config, runtime directories, and capability declarations; missing required inputs SHALL fail-fast |
+| `repair/check` | MAY diagnose missing or corrupted workspace structure and suggest explicit repair actions |
 
 | 目录 | 必要性 | 用途 |
 |------|--------|------|
-| `SOUL.md` | SHOULD | 用户可编辑的项目人格与工作方式 |
-| `myteam.config.json` | SHOULD | 用户可编辑的 workspace 配置，不存 secret |
+| `SOUL.md` | SHOULD by layout, REQUIRED when referenced by runtime profile | 用户可编辑的项目人格与工作方式 |
+| `myteam.config.json` | SHOULD by layout, REQUIRED when selected runtime/profile needs explicit config | 用户可编辑的 workspace 配置，不存 secret |
 | `skills/` | SHOULD | 用户可编辑技能定义目录 |
 | `agents/` | SHOULD | 用户可编辑 Agent 定义目录 |
 | `.myteam/sessions/` | **MUST** | 会话持久化文件目录 |
@@ -23,21 +29,22 @@ At minimum, the workspace root MUST contain or allow creation of:
 | `.myteam/memory/` | MAY | 跨会话持久化记忆（预留） |
 | `.myteam/runs/` | **MUST** | 运行记录目录（TaskRecord / EventLog / Evidence / ReplayCase） |
 
-MyTeam MUST NOT create workspace directories outside the resolved workspace root. Missing critical runtime directories on access SHALL trigger a fail-fast error with a clear diagnostic message indicating which path is missing.
+MyTeam MUST NOT create workspace directories outside the resolved workspace root. Ordinary task execution MUST NOT silently create missing critical runtime directories as a fallback for corrupted workspace state; it SHALL return a structured diagnostic and suggest `init` or repair when appropriate.
 
 #### Scenario: Fresh workspace initialization
 
 - **GIVEN** a directory exists but contains no MyTeam workspace structure
-- **WHEN** MyTeam initializes the workspace
+- **WHEN** MyTeam runs explicit workspace initialization
 - **THEN** `skills/`, `agents/`, `.myteam/sessions/`, `.myteam/sessions/archives/`, `.myteam/memory/`, and `.myteam/runs/` directories SHALL be created
 - **AND** no files outside the workspace root SHALL be created
 
-#### Scenario: Corrupted workspace fails fast
+#### Scenario: Ordinary run fails fast on corrupted runtime directory
 
-- **GIVEN** a workspace that has `.myteam/sessions/` directory missing or corrupted
-- **WHEN** MyTeam attempts to access session storage
+- **GIVEN** a workspace that has `.myteam/sessions/` directory missing or corrupted after initialization
+- **WHEN** MyTeam attempts to access session storage during ordinary task execution
 - **THEN** it SHALL report a structured error identifying the missing path
 - **AND** it MUST NOT silently create a new session directory with different naming or location
+- **AND** it SHALL provide an explicit repair or init suggestion
 
 ---
 
@@ -72,13 +79,15 @@ Session files SHALL be readable without additional tools, index files, or extern
 
 ---
 
-### Requirement: Session writes use atomic file replacement
+### Requirement: Session writes use atomic replacement plus per-session concurrency control
 
 MyTeam SHALL implement session writes using atomic write-then-rename semantics. Writing a session MUST write to a temporary file first, then atomically rename to the target path.
 
+Atomic rename only guarantees file integrity; it does not merge concurrent logical updates. Therefore MyTeam session writes MUST also use per-session write serialization and `revision`-based conflict detection. A mutating write SHALL load the latest session under the session write lock, apply the mutation, increment `revision`, and then atomically replace the file.
+
 The temporary file path SHALL include the process ID and a timestamp to avoid collisions: `{targetPath}.{pid}.{timestamp}.tmp`.
 
-MyTeam SHALL document that atomic rename depends on POSIX filesystem semantics. For non-POSIX filesystems, the implementation MAY provide a documented degraded mode that does not guarantee concurrent-write safety.
+MyTeam SHALL document that atomic rename and file locking depend on filesystem semantics. For filesystems where locking or rename semantics are unavailable, the implementation MUST return an explicit unsupported/degraded capability and MUST NOT claim concurrent-write safety.
 
 #### Scenario: Write never produces a partial file
 
@@ -94,12 +103,21 @@ MyTeam SHALL document that atomic rename depends on POSIX filesystem semantics. 
 - **THEN** the original `.myteam/sessions/{sessionId}.json` SHALL remain intact
 - **AND** the temporary file MAY be left behind as a cleanup artifact
 
-#### Scenario: Two concurrent writers do not produce data loss
+#### Scenario: Concurrent appends preserve both messages
 
-- **GIVEN** two concurrent writers attempt to save the same session
-- **WHEN** both writes complete
-- **THEN** the final file SHALL contain the complete data from the last write that completed the rename
-- **AND** no interleaved or merged partial content SHALL appear
+- **GIVEN** two concurrent callers append different messages to the same session
+- **WHEN** both appends complete successfully
+- **THEN** the final session SHALL contain both appended messages in a deterministic append order
+- **AND** the final `revision` SHALL be incremented for each successful mutation
+- **AND** no caller SHALL overwrite a message appended by another caller
+
+#### Scenario: Stale full-session save fails with conflict
+
+- **GIVEN** a caller loaded session revision `5`
+- **AND** another writer already persisted revision `6`
+- **WHEN** the first caller attempts `saveSession` with expected revision `5`
+- **THEN** MyTeam SHALL reject the write with a structured conflict error
+- **AND** MUST NOT overwrite revision `6` with stale data
 
 ---
 
@@ -128,6 +146,8 @@ MyTeam session storage SHALL use MyTeam public IDs rather than PI internal IDs o
 
 ### Requirement: ChatSession has a strict schema aligned with GenetHub
 
+MyTeam SHALL use `ChatSession` as the GenetHub-compatible persisted JSON schema under `.myteam/sessions/`. `SessionTranscript` is the durable logical transcript contained in or derived from `ChatSession.messages`, summaries, and public task/run reference entries. `ConversationSession` is the public API projection returned by TeamEngine session operations, and `SessionSnapshot` is the resume-time view rebuilt from persisted transcript data. These names MUST describe different boundaries over the same durable session identity, not competing session stores.
+
 MyTeam SHALL define `ChatSession` with the following minimum fields:
 
 | 字段 | 类型 | 必要性 | 说明 |
@@ -138,6 +158,7 @@ MyTeam SHALL define `ChatSession` with the following minimum fields:
 | `status` | `'active' \| 'done' \| 'archived'` | MUST | 会话生命周期状态 |
 | `createdAt` | `number` | MUST | 创建时间（毫秒时间戳） |
 | `updatedAt` | `number` | MUST | 最后更新时间（毫秒时间戳） |
+| `revision` | `number` | MUST | 每次持久化 mutation 后递增，用于并发控制 |
 | `participants` | `Participant[]` | MUST | 参与方列表 |
 | `archiveIds` | `string[]` | MUST | 归档引用列表 |
 | `messages` | `SessionMessage[]` | MUST | 消息列表 |
@@ -195,7 +216,13 @@ Each `SessionMessage` in the messages array SHALL include:
 | `kind` | `string` | MUST | 消息类别（如 'chat', 'status', 'artifact', 'error'） |
 | `mentions` | `string[]` | MUST | @提及的 participant ID 列表 |
 | `meta` | `Record<string, unknown>` | MUST | 扩展元数据 |
-| `llmRequestId` | `string` | MUST | 关联的 LLM 请求 ID（无关联时为空字符串） |
+| `turnId` | `string` | MAY | 关联的用户轮次 ID |
+| `taskId` | `string` | MAY | 关联的逻辑任务 ID |
+| `runId` | `string` | MAY | 关联的执行尝试 ID |
+| `eventRefs` | `string[]` | MAY | 关联的公开事件引用 |
+| `evidenceRefs` | `string[]` | MAY | 关联的证据引用 |
+| `replayRef` | `string` | MAY | 关联的 replay case 引用 |
+| `llmRequestId` | `string` | MAY | 脱敏后的 adapter-private LLM 请求关联；不得作为公开 task/run 链接 |
 
 Session messages MUST be appended in chronological order. The `ts` field SHALL reflect the message creation time, not the file write time.
 
@@ -252,11 +279,11 @@ For `agents-chat` sessions, `metadata.projectState` SHALL capture the orchestrat
 | `title` | `string` | MUST | 项目标题 |
 | `goal` | `string` | MUST | 项目目标 |
 | `driverId` | `string` | MUST | 驱动模式（如 'freeform'） |
-| `phase` | `string` | MUST | 当前自由编排阶段（如 'coordination'、'done'、'failed'；不得假设固定线性阶段图） |
+| `coordinationState` | `string` | MUST | 当前自由编排状态（如 'coordination'、'done'、'failed'；不得假设固定线性阶段图） |
 | `status` | `string` | MUST | 当前状态（如 'created', 'running', 'done', 'failed', 'cancelled'） |
 | `turnCount` | `number` | MUST | 当前轮次计数 |
 | `nextSpeakerId` | `string \| null` | MUST | 下一发言方 participant.id |
-| `allowedTransitions` | `string[]` | MUST | 允许的 action 类型，兼容旧命名；语义等同 allowedActions |
+| `allowedActions` | `string[]` | MUST | 当前允许的 action 类型，如 delegate、finalize、fail、approval |
 | `artifacts` | `Artifact[]` | MUST | 产出物列表 |
 | `plan` | `Plan \| null` | SHOULD | 当前计划 |
 | `verification` | `Verification \| null` | SHOULD | 验收状态 |
@@ -316,13 +343,13 @@ An archive file SHALL contain at minimum the archived messages and metadata link
 
 MyTeam SHALL separate user-visible session transcript data from detailed execution facts. `ChatSession` (stored under `.myteam/sessions/`) SHALL contain user-visible messages, summaries, and orchestration state. `TaskRecord`, `EventLog`, `Evidence`, and `ReplayCase` (stored under `.myteam/runs/{runId}/`) SHALL contain complete execution facts including tool calls, agent actions, errors, and artifacts.
 
-Session transcripts SHALL reference run records through `SessionMessage.llmRequestId` and similar linking fields, but SHALL NOT duplicate detailed execution facts, tool outputs, or internal reasoning.
+Session transcripts SHALL reference run records through public MyTeam links such as `turnId`, `taskId`, `runId`, `eventRefs`, `evidenceRefs`, and `replayRef`, but SHALL NOT duplicate detailed execution facts, tool outputs, or internal reasoning. `llmRequestId` MAY exist only as sanitized adapter-private metadata and MUST NOT be required for replay, resume, or user-visible traceability.
 
 #### Scenario: Session transcript links to run without duplicating facts
 
 - **GIVEN** an agents-chat session has an active project run
 - **WHEN** the session is loaded
-- **THEN** session messages SHALL include references (e.g., `llmRequestId`) that link to run events
+- **THEN** session messages SHALL include public references such as `taskId`, `runId`, event refs, evidence refs, or replay refs that link to run records
 - **AND** the session file SHALL NOT contain complete tool outputs, debug logs, or internal event traces
 
 #### Scenario: Replay uses run records, not session transcript
@@ -362,15 +389,17 @@ SessionStore SHALL NOT expose internal file paths, temporary files, or buffer co
 
 ---
 
-### Requirement: SessionManager provides caching and event notification
+### Requirement: SessionManager provides serialized session mutation and event notification
 
-MyTeam SHALL define `SessionManager` as an optional layer over `SessionStore` that provides:
+MyTeam SHALL define `SessionManager` as the required TeamEngine layer for session mutations. It wraps `SessionStore` and provides:
 
 - In-memory session caching to reduce disk reads.
 - Event notifications for session lifecycle changes (`session-created`, `session-updated`, `messages-appended`).
 - Dirty write merging to reduce disk I/O frequency.
+- Per-session mutation serialization through a `SessionActor` or equivalent queue.
+- `revision` conflict detection and retry / fail-fast behavior.
 
-SessionManager SHALL delegate all persistence to `SessionStore` and MUST NOT implement its own file writing logic. SessionManager MAY not be necessary for all usage scenarios; direct `SessionStore` usage SHALL remain supported.
+SessionManager SHALL delegate persistence to `SessionStore` and MUST NOT implement independent file writing logic. Direct `SessionStore` reads MAY remain supported for tests and maintenance, but TeamEngine ordinary session writes MUST go through SessionManager or an equivalent serialized mutation layer.
 
 #### Scenario: Session cache avoids redundant disk reads
 

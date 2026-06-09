@@ -16,7 +16,7 @@
 - [x] 2.1 将 MyTeam Node engine 策略定为 `>=22.19.0`，并明确低版本 Node 隔离方案不作为默认路线
 - [ ] 2.2 引入并固定 PI 相关依赖版本：`@earendil-works/pi-agent-core`、`@earendil-works/pi-ai`
 - [ ] 2.3 定义 `InternalAgentRuntime` 接口，提供 `runTurn(input)`
-- [ ] 2.4 实现 MyTeam prompt assets 注入：`systemPrompt`、`SOUL.md`、`AGENT.md`、capability block
+- [ ] 2.4 实现 MyTeam prompt assets 注入：`systemPrompt`、`SOUL.md`、`agents/{agent-name}.md` 或 profile 指定 prompt、capability block
 - [ ] 2.5 实现 MyTeam message view 到 PI Agent context 的转换
 - [ ] 2.6 实现 PI final message / usage / tool results 到 MyTeam `AgentTurnResult` 的转换
 - [ ] 2.7 验证命令：`npm run typecheck`
@@ -61,7 +61,7 @@
 - [ ] 7.1 实现或调整 `myteam "..." --workspace ... --json`，走同一 Task Core / TeamEngine
 - [ ] 7.2 实现 `TaskResult` 输出：status、summary、artifacts、evidence、errors、replayRef
 - [ ] 7.3 确保宿主服务器可通过 library API 复用相同 TeamEngine，不复制业务实现
-- [ ] 7.4 实现 replay case 导出，记录 PI 版本、workspace 摘要、prompt assets 摘要、events、evidence
+- [ ] 7.4 实现 replay case 导出，记录 PI 版本、workspace 摘要、WorkspaceSnapshotRef 或 unavailable reason、prompt assets 摘要、events、evidence
 - [ ] 7.5 验证：同一任务可导出 replay case，并可用 replay 命令或测试解释复现
 
 ## Phase 8 — 最终验证

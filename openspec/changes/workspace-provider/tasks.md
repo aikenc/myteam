@@ -11,7 +11,7 @@
 - [x] 1.3 明确命名为 `WorkspaceProvider`：它不只是 snapshot provider，而是运行时 workspace 状态与可执行副本抽象。
 - [x] 1.4 明确 V1 使用 Git snapshot commit + Git worktree，未来可接入其他 provider。
 - [x] 1.5 明确 nested Git dirty / untracked 状态必须被捕获或 fail closed。
-- [ ] 1.6 更新 `docs/technical-architecture.md`，加入 Workspace Provider 模块和 Git V1 策略。
+- [x] 1.6 更新 `docs/technical-architecture.md`，加入 Workspace Provider 模块和 Git V1 策略。
 
 ## Phase 2 — 公共类型与契约
 
@@ -35,7 +35,7 @@
 - [ ] 4.1 使用临时 index 捕获 root repo snapshot commit，不污染用户 index / branch。
 - [ ] 4.2 对每个 nested repo 单独捕获 snapshot commit。
 - [ ] 4.3 snapshot ref 写入 `refs/myteam/runs/{runId}/nodes/{nodeId}/{point}/{repoId}`。
-- [ ] 4.4 默认包含 tracked / staged / unstaged / untracked non-ignored 文件。
+- [ ] 4.4 默认包含 tracked / staged / unstaged / untracked non-ignored 文件，但排除 `.myteam/`、`.git/`、prepared copy 目录和 redaction paths。
 - [ ] 4.5 默认排除 ignored 文件和 secret-bearing 文件，生成 redaction report。
 - [ ] 4.6 任一必需 nested repo 无法 snapshot 时，返回结构化 unavailable / fail closed。
 - [ ] 4.7 单测验证 dirty nested repo 的修改和 untracked 文件可被 snapshot 捕获。

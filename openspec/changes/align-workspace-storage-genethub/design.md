@@ -75,9 +75,9 @@ SessionStore
   - archiveFilePath = archivesDir/{archiveId}.json
 ```
 
-### 3.2 原子写入
+### 3.2 原子写入、锁与 revision
 
-对齐 GenetHub 的原子写入模式：
+对齐 GenetHub 的原子写入模式，但必须补足 MyTeam 的同 session 并发语义：临时文件 + rename 只保证读者不会看到半截 JSON，不保证两个 writer 的逻辑合并。MyTeam 的 session 写入必须同时使用 per-session write lock 与 `revision` 乐观并发控制。
 
 ```ts
 async function writeJsonAtomic(filePath: string, data: unknown): Promise<void> {
@@ -89,17 +89,20 @@ async function writeJsonAtomic(filePath: string, data: unknown): Promise<void> {
 ```
 
 关键约束：
-- 使用临时文件 + rename 保证原子性。
+- 使用临时文件 + rename 保证文件替换原子性。
 - 临时文件命名包含 pid 和时间戳，避免冲突。
 - JSON 格式化输出（2 空格缩进），末尾换行。
-- 依赖文件系统 rename 的原子语义（POSIX 保证），非 POSIX 环境需额外文档化降级策略。
+- 每次 mutating write 必须在同一 session 的写锁内执行：读取最新 session、校验或应用 revision、写入新 revision。
+- `appendMessages()` 必须在锁内基于最新 session append，不允许用过期快照覆盖新消息。
+- `saveSession()` 如果基于过期 revision，必须返回结构化 conflict error，而不是 last-write-wins。
+- 依赖文件系统 rename / lock 语义；非 POSIX 环境需额外文档化降级策略，且不能宣称 concurrent-write safe。
 
 ### 3.3 写入时机
 
-- `createSession()`：创建时立即写入。
-- `saveSession()`：session 状态变化时写入（全量覆盖）。
-- `appendMessages()`：追加消息后写入全量 session。
-- 写入策略为全量覆盖而非增量追加，保证一致性。
+- `createSession()`：创建时立即写入，初始 `revision = 0`。
+- `saveSession()`：session 状态变化时写入（全量覆盖），但必须带 expected revision 或等价冲突检查。
+- `appendMessages()`：追加消息后写入全量 session，并将 revision 递增。
+- 写入策略当前仍为全量覆盖，但并发正确性由锁 + revision 保证，而不是由 rename 保证。
 - 未来可引入 archive 机制将历史消息分离存储，减少主 session 文件体积。
 
 ---
@@ -110,7 +113,9 @@ async function writeJsonAtomic(filePath: string, data: unknown): Promise<void> {
 
 本设计中的 `ChatSession`、`SessionMessage` 等类型是 GenetHub-compatible 的持久化 session schema，可以保留 GenetHub 的毫秒时间戳字段。MyTeam 公共 `TaskEvent`、`TaskRecord`、`Evidence`、`ReplayCase` 对外使用 ISO 8601 字符串时间戳；SessionStore / SessionManager 负责在存储 schema 与公共契约之间做显式转换或标注。
 
-ID 由 contracts 层统一生成和校验。session 存储层不得自行拼接或发明前缀；当前公共 ID 前缀为 `session_`、`message_`、`archive_`、`turn_`、`task_`、`run_`、`ws_`、`evidence_`、`artifact_`。PI 内部 request、message、tool ID 不得当作 MyTeam 公共 ID。
+Session 名词边界固定如下：`ChatSession` 是 `.myteam/sessions/` 下的持久化 JSON schema；`SessionTranscript` 是从 `ChatSession.messages`、摘要和 task/run 引用形成的逻辑 transcript；`ConversationSession` 是 TeamEngine public API 返回的轻量投影；`SessionSnapshot` 是 `resumeSession()` 从持久化 transcript 重建出的视图。
+
+ID 由 contracts 层统一生成和校验。session 存储层不得自行拼接或发明前缀；当前公共 ID 前缀为 `session_`、`message_`、`archive_`、`turn_`、`task_`、`run_`、`ws_`、`evidence_`、`artifact_`。Session 与 run 的公开引用必须使用 MyTeam 公共 ID，例如 `turnId`、`taskId`、`runId`、event ref、evidence ref 和 replay ref。PI 内部 request、message、tool ID 不得当作 MyTeam 公共 ID，只能作为脱敏后的 adapter-private metadata。
 
 ### 4.1 ChatSession（对齐 GenetHub）
 
@@ -122,6 +127,7 @@ interface ChatSession {
   status: 'active' | 'done' | 'archived';
   createdAt: number;         // 毫秒时间戳
   updatedAt: number;         // 毫秒时间戳
+  revision: number;          // 每次持久化 mutation 后递增
   participants: Participant[];
   archiveIds: string[];      // 归档引用
   messages: SessionMessage[];
@@ -159,7 +165,13 @@ interface SessionMessage {
   kind: string;              // 'chat' | 'status' | 'artifact' | 'error'
   mentions: string[];        // @提及的 participant.id 列表
   meta: Record<string, unknown>;
-  llmRequestId: string;      // 关联的 LLM 请求 ID
+  turnId?: string;           // 关联的用户轮次 ID
+  taskId?: string;           // 关联的逻辑任务 ID
+  runId?: string;            // 关联的执行尝试 ID
+  eventRefs?: string[];      // 关联的公开事件引用
+  evidenceRefs?: string[];   // 关联的证据引用
+  replayRef?: string;        // 关联的 replay case 引用
+  llmRequestId?: string;     // 脱敏 adapter-private 关联，不作为 public task/run link
 }
 ```
 
@@ -171,11 +183,11 @@ interface SessionMetadata {
     title: string;
     goal: string;
     driverId: string;        // 'freeform'
-    phase: ProjectPhase;     // 'coordination' | 'done' | 'failed' 等自由编排阶段
-    status: ProjectStatus;   // 'created' | 'running' | 'done' | 'failed' | 'cancelled'
+    coordinationState: string; // 'coordination' | 'done' | 'failed' 等自由编排状态，不代表固定线性阶段
+    status: ProjectStatus;     // 'created' | 'running' | 'done' | 'failed' | 'cancelled'
     turnCount: number;
     nextSpeakerId: string | null;
-    allowedTransitions: TransitionKind[];  // 兼容旧命名，语义等同 allowedActions：'delegate' | 'finalize' | 'fail' | 'approval'
+    allowedActions: ActionKind[]; // 'delegate' | 'finalize' | 'fail' | 'approval' 等当前允许 action
     artifacts: Artifact[];
     plan: Plan | null;                    // 可选 artifact，不代表固定阶段
     verification: Verification | null;    // 可选 artifact，不代表固定阶段
@@ -269,9 +281,10 @@ Session                                Run
   | 存储: .myteam/sessions/{sessionId}.json | 存储: .myteam/runs/{runId}/
 ```
 
-- `ChatSession` 存储用户可见的对话内容、摘要和编排状态。
+- `ChatSession` 存储用户可见的对话内容、摘要和编排状态，并承载 `SessionTranscript` 逻辑视图。
 - `TaskRecord`、`EventLog`、`Evidence` 存储完整的执行事实，位于 `.myteam/runs/{runId}/`。
-- Session 通过 `llmRequestId` 引用 run 中的具体事件，但不冗余存储详细事实。
+- Session 通过 `turnId`、`taskId`、`runId`、event refs、evidence refs 和 replay refs 引用 run records，但不冗余存储详细事实。
+- `llmRequestId` 只能作为脱敏 adapter-private metadata，不能作为 replay、resume 或用户可见追踪的必要链接。
 - 复盘和回放基于 `.myteam/runs/` 目录，不依赖 session transcript 中的摘要。
 
 ---
@@ -326,7 +339,9 @@ Session                                Run
 ## 10. 验证方式
 
 - 契约测试：`createSession` → `loadSession` 往返一致性。
-- 原子写入测试：并发写入同一 session 不发生数据损坏。
+- 原子写入测试：写入过程中读者只看到完整旧 JSON 或完整新 JSON。
+- 并发追加测试：两个并发 `appendMessages()` 都成功后，最终 session 包含两边消息且 revision 单调递增。
+- 冲突测试：基于过期 revision 的 `saveSession()` 返回结构化 conflict error，不覆盖新消息。
 - 归档测试：消息从主 session 移到 archive 后 session 文件体积缩小。
 - 类型导出验证：阶段 1 中 `ChatSession`、`SessionMessage`、`Participant`、`ProjectState` 等类型从 `packages/engine/src/contracts` 正确导出；后续满足提包信号后再迁移到独立 `packages/contracts`。
 - 文件系统验证：创建的 session 文件格式化为 2 空格缩进的 JSON，末尾含换行符。

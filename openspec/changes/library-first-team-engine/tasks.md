@@ -23,11 +23,12 @@
 - [ ] 2.4 定义 `ActiveRun`、`RunStatus`、`RunStatusSnapshot`、`EventCursor`、`OutcomeOptions`、`CancelReason`
 - [ ] 2.5 明确 `sessionId` / `turnId` / `taskId` / `runId` 的关系，并更新 `TaskEvent` / `TaskRecord` / `ReplayCase` / `SessionTranscript` 引用字段
 - [ ] 2.6 定义 request normalizer，供 library API、默认 CLI 和 replay 复用
+- [ ] 2.6a 定义 public workspace lifecycle API：`initWorkspace`、`checkWorkspace`、`repairWorkspace`，与 CLI init/check/repair 共用 validation 语义
 - [ ] 2.7 验证命令：`npm run typecheck`
 
 ## Phase 3 — 最小 TeamEngine 实现
 
-- [ ] 3.1 实现本地 `TeamEngine`，可先使用内存 session store、run store 与 event log
+- [ ] 3.1 实现本地 `TeamEngine`，真实验收路径必须使用可持久化 session store、run store、event log、TaskRecord、Evidence、ReplayCase；内存 store 仅用于单测或 prototype
 - [ ] 3.2 实现 `openSession` / `resumeSession` / `forkSession`：维护 append-only `SessionTranscript`
 - [ ] 3.3 实现 `start`：接收 `TaskRequest` 与可选 `StartRunOptions`，创建 `runId`，启动 Team Workflow，并关联 `sessionId` / `turnId`
 - [ ] 3.4 实现 `stream`：按 `runId` 与 `EventCursor` 返回有序 `TaskEvent`
@@ -38,13 +39,14 @@
 
 ## Phase 4 — 默认 CLI 接入
 
-- [ ] 4.1 实现 CLI 根命令：`myteam "..." --workspace ... --json`
+- [ ] 4.1 实现 CLI 根命令：`myteam "..." --workspace ... --json`，普通 run 模式缺 workspace 结构时返回结构化错误和 init/repair 建议
 - [ ] 4.2 实现显式 task 参数：`myteam --task "..." --workspace ... --json`
 - [ ] 4.3 实现 stdin 输入：`cat task.md | myteam --workspace ... --json`
 - [ ] 4.4 实现会话恢复输入：`myteam --continue "..."` 与 `myteam --resume <sessionId-or-name> "..."`
 - [ ] 4.5 stdout / stderr 分离：stdout 输出结果 JSON，stderr 输出日志或人类进度
 - [ ] 4.6 默认 CLI 不得包含 CLI 专用业务 fallback、默认工具或默认人格
 - [ ] 4.7 不实现 `myteam run` 作为必需命令；默认命令即一次性执行
+- [ ] 4.7a 实现 workspace lifecycle CLI：`myteam init`、`myteam check`，并预留或实现 `myteam repair`
 - [ ] 4.8 验证：运行 `myteam "读取 README 并总结项目定位" --workspace /data/workspace/myteam --json`
 - [ ] 4.9 验证：运行 `myteam --continue "继续刚才的总结" --workspace /data/workspace/myteam --json`
 
@@ -70,6 +72,6 @@
 
 - [ ] 7.1 `npm run typecheck`
 - [ ] 7.2 `npm test`
-- [ ] 7.3 手动运行默认 CLI 路径并保存 TaskResult / TaskRecord / ReplayCase 证据
+- [ ] 7.3 手动运行默认 CLI 路径并保存 TaskResult / TaskRecord / ReplayCase / WorkspaceSnapshotRef 证据
 - [ ] 7.4 手动运行 replay 路径并保存 replay 结果或差异说明
 - [ ] 7.5 检查不存在 `myteam serve`、必需 `myteam run`、或 turn / tool-call / 消息流粒度反复启动 `myteam` 自身的实现

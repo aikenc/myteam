@@ -8,7 +8,7 @@
 
 > 验证方式：类型文件编译通过，`packages/engine/src/contracts` 导出所有 session 相关类型。
 
-- [ ] 1.1 在 `packages/engine/src/contracts/session.ts` 定义 `ChatSession`、`SessionMessage`、`Participant`、`SessionMetadata`、`Outcome`。
+- [ ] 1.1 在 `packages/engine/src/contracts/session.ts` 定义 `ChatSession`、`SessionMessage`、`Participant`、`SessionMetadata`、`Outcome`，并包含 `revision` 并发控制字段。
 - [ ] 1.2 定义 `CreateSessionInput`、`AppendMessagesInput`、`CreateMessageInput`、`SessionQuery` 等输入类型。
 - [ ] 1.3 定义 `SessionArchive` 和 `ArchiveOptions` 类型。
 - [ ] 1.4 从 `packages/engine/src/contracts/index.ts` 导出所有 session 相关类型，并由 `packages/engine/src/index.ts` 只暴露 public API。
@@ -27,13 +27,15 @@ npm run typecheck
 > 验证方式：集成测试，创建 session → 读取 session → 追加消息 → 归档，验证 `.myteam/` 下 JSON 文件内容。
 
 - [ ] 2.1 在 `packages/engine/src/workspace/` 实现 `writeJsonAtomic()` 原子写入工具函数。
-- [ ] 2.2 实现 `SessionStore` 类：`createSession`、`loadSession`、`saveSession`、`deleteSession`。
-- [ ] 2.3 实现 `appendMessages()` 和 `listSessions()`。
-- [ ] 2.4 实现 `archiveMessages()` 和 `loadArchive()`。
-- [ ] 2.5 编写集成测试：
+- [ ] 2.2 实现 per-session write lock 与 revision conflict 检测，明确 atomic rename 不负责逻辑合并。
+- [ ] 2.3 实现 `SessionStore` 类：`createSession`、`loadSession`、`saveSession(expectedRevision)`、`deleteSession`。
+- [ ] 2.4 实现 `appendMessages()` 和 `listSessions()`，确保 append 基于最新 revision。
+- [ ] 2.5 实现 `archiveMessages()` 和 `loadArchive()`。
+- [ ] 2.6 编写集成测试：
   - [ ] 创建 session，验证 `.myteam/sessions/{sessionId}.json` 文件存在且内容正确。
-  - [ ] 追加消息，验证消息正确追加且 `updatedAt` 更新。
-  - [ ] 并发写入同一 session，验证数据完整性。
+  - [ ] 追加消息，验证消息正确追加且 `updatedAt` / `revision` 更新。
+  - [ ] 并发 `appendMessages()` 同一 session，验证两边消息都存在且 revision 单调递增。
+  - [ ] 基于过期 revision 的 `saveSession()` 返回 conflict error，不覆盖新消息。
   - [ ] 归档消息，验证 `.myteam/sessions/archives/{archiveId}.json` 生成且主 session 消息已移除。
   - [ ] 列出 sessions，验证过滤和排序。
 
@@ -51,7 +53,7 @@ npm test
 
 - [ ] 3.1 在 `packages/engine/src/workspace/` 实现 `SessionManager`：包装 SessionStore，增加内存缓存。
 - [ ] 3.2 实现事件通知机制：`session-created`、`session-updated`、`messages-appended`。
-- [ ] 3.3 实现 `SessionActor` 串行化队列，保证同一 session 的写操作排队。
+- [ ] 3.3 实现 `SessionActor` 串行化队列，保证 TeamEngine 同一 session 的写操作必须排队。
 - [ ] 3.4 编写集成测试：
   - [ ] 创建 session 后触发 `session-created` 事件。
   - [ ] 同一 session 并发写入按序执行。
@@ -69,13 +71,13 @@ npm test
 
 > 验证方式：初始化测试，验证用户可编辑资产目录与 `.myteam/` 运行时目录按约定创建。
 
-- [ ] 4.1 实现 `initWorkspace(path)`：创建 `skills/`、`agents/`、`.myteam/sessions/`、`.myteam/sessions/archives/`、`.myteam/memory/`、`.myteam/runs/` 目录。
-- [ ] 4.2 实现 `validateWorkspace(path)`：检查必要目录存在性，缺失时 fail-fast。
-- [ ] 4.3 集成到 SessionStore 构造逻辑：SessionStore 初始化时确保 `.myteam/sessions/` 与 archive 目录存在。
+- [ ] 4.1 实现 `initWorkspace(path)`：显式初始化时创建 `skills/`、`agents/`、`.myteam/sessions/`、`.myteam/sessions/archives/`、`.myteam/memory/`、`.myteam/runs/` 目录。
+- [ ] 4.2 实现 `validateWorkspace(path, mode)`：区分 `init`、`run`、`repair/check`，普通 `run` 缺关键目录时 fail-fast 并给出修复建议。
+- [ ] 4.3 集成到 SessionStore / TeamEngine 构造逻辑：普通任务执行不得静默修复已损坏 runtime 目录。
 - [ ] 4.4 编写测试：
-  - [ ] 新 workspace 初始化后所有必要目录存在。
-  - [ ] 缺失 session 目录时 createSession 自动创建。
-  - [ ] 损坏或缺失关键目录时 validateWorkspace 报错。
+  - [ ] 新 workspace 显式初始化后所有必要目录存在。
+  - [ ] 普通 run 遇到缺失 session 目录时返回结构化 workspace_error，不静默创建。
+  - [ ] repair/check 模式能给出明确修复建议。
 
 ```bash
 # 验证命令
